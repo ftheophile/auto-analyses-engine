@@ -11,8 +11,11 @@ def get_backtest_day_stats(portfolio_df, instruments, date, date_prev, date_idx,
             price_change = historical_data.loc[date, "{} close".format(inst)] - historical_data.loc[date_prev, "{} close".format(inst)]
             dollar_change = price_change * 1
             inst_pnl = dollar_change * previous_holdings
+            portfolio_df.loc[date_idx, "{} pnl".format(inst)] = portfolio_df.loc[date_idx - 1, "{} pnl".format(inst)] + inst_pnl
             pnl += inst_pnl
             nominal_ret += portfolio_df.loc[date_idx - 1, "{} w".format(inst)] * historical_data.loc[date, "{} % ret".format(inst)]
+        else:
+            portfolio_df.loc[date_idx, "{} pnl".format(inst)] = portfolio_df.loc[date_idx - 1, "{} pnl".format(inst)]
     
     capital_ret = nominal_ret * portfolio_df.loc[date_idx - 1, "leverage"]
     portfolio_df.loc[date_idx, "capital"] = portfolio_df.loc[date_idx - 1, "capital"] + pnl

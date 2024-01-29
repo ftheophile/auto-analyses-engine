@@ -1,12 +1,15 @@
 import json 
 import pandas as pd
 import numpy as np
-import quantlib.backtest_utils as backtest_utils
-import quantlib.indicators_cal as indicators_cal
+import datetime;
+import quantlib.backtest_utils as btu
+import quantlib.general_utils as gu
+import quantlib.indicators_cal as idc
 
 class Lbmom:
     def __init__(self, instruments_config, historical_df, simulation_start, vol_target):
-        self.pairs = [(150, 192), (16, 271), (103, 176), (18, 200), (164, 245), (114, 131), (126, 298), (35, 260), (40, 91), (26, 190), (268, 272), (207, 275), (64, 146), (26, 129), (69, 251), (199, 293), (71, 140), (31, 70), (42, 166), (73, 75), (52, 161)]
+        #self.pairs = [(150, 192), (16, 271), (103, 176), (18, 200), (164, 245), (114, 131), (126, 298), (35, 260), (40, 91), (26, 190), (268, 272), (207, 275), (64, 146), (26, 129), (69, 251), (199, 293), (71, 140), (31, 70), (42, 166), (73, 75), (52, 161)]
+        self.pairs = [(122, 234), (34, 285), (173, 217), (37, 88), (110, 177), (252, 277), (160, 233), (39, 287), (60, 95), (106, 173), (264, 273), (136, 273), (25, 176), (261, 295), (55, 254), (37, 175), (57, 249), (123, 143), (111, 141), (99, 261), (119, 211)]
         self.historical_df = historical_df
         self.simulation_start = simulation_start
         self.vol_target = vol_target
@@ -24,7 +27,7 @@ class Lbmom:
         # we also want a univariate statistical factor as an indicator of regime. 
         # We use the average directional index ADX as a proxy for momentum regime indicator
         for inst in instruments:
-            historical_data["{} adx".format(inst)] = indicators_cal.adx_series(
+            historical_data["{} adx".format(inst)] = idc.adx_series(
                 high=historical_data["{} high".format(inst)],
                 low=historical_data["{} low".format(inst)],
                 close=historical_data["{} close".format(inst)],
@@ -32,15 +35,15 @@ class Lbmom:
             )
             for pair in self.pairs:
                 # calculate the fastMA - slowMA
-                historical_data["{} ema{}".format(inst, str(pair))] = indicators_cal.ema_series(
-                    historical_data["{} close".format(inst)], n=pair[0]) - indicators_cal.ema_series(
+                historical_data["{} ema{}".format(inst, str(pair))] = idc.ema_series(
+                    historical_data["{} close".format(inst)], n=pair[0]) - idc.ema_series(
                         historical_data["{} close".format(inst)], n=pair[1])
                 
         # the historical_data has all the info required for backtesting        
         return historical_data
         
 
-    def run_simulation(self, historical_data):
+    def run_simulation(self, historical_data, startCapital):
         """
         Init Params
         """
@@ -58,7 +61,10 @@ class Lbmom:
         historical_data = self.extend_historicals(instruments=instruments, historical_data=historical_data)
         #print(historical_data)
         portfolio_df = pd.DataFrame(index=historical_data[self.simulation_start:].index).reset_index()
-        portfolio_df.loc[0, "capital"] = 10000
+        portfolio_df.loc[0, "capital"] = startCapital
+        portfolio_df.loc[0, "daily pnl"] = 0
+        portfolio_df.loc[0, "capital ret"] = 0
+        portfolio_df.loc[0, "nominal ret"] = 0
         is_halted = lambda inst, date: not np.isnan(historical_data.loc[date, "{} % active".format(inst)]) and (~historical_data[:date].tail(3)["{} % active".format(inst)].any())
         # this means that in order to not be a halted asset, it needs to have actively traded over the last 3 data points at the minimum
         #print(portfolio_df)
@@ -76,26 +82,36 @@ class Lbmom:
         2. Asset vol Targetting (relative across assets)
         3. Voting Systems (Indicating the degree of momentum factor)
         """
-        for i in portfolio_df.index:
+
+        def get_weekday_from_date(dat):
+            yymmdd = list(map(lambda x: int(x), str(dat).split("-")))
+            return datetime.date(yymmdd[0], yymmdd[1], yymmdd[2]).weekday() + 1 # Making monday 1 and Sunday 7
+        votas = None
+        for i in gu.progressBar(portfolio_df.index, prefix = 'Progress:', suffix = 'Complete'):
+        #for i in portfolio_df.index:
             date = portfolio_df.loc[i, "date"]
             strat_scalar = 2 # strategy scalar 
             nominal_total = 0
             
             tradable = [inst for inst in instruments if not is_halted(inst, date)]
             non_tradable = [inst for inst in instruments if inst not in tradable] 
+            portfolio_df.loc[i, "weekday"] = get_weekday_from_date(date)
 
+            if i == 0:
+                for inst in instruments:
+                    portfolio_df.loc[i, "{} pnl".format(inst)] = 0
             """
             Get PnL, Scalars
             """
             if i != 0:
                 #pass
                 date_prev = portfolio_df.loc[i-1, "date"]
-                pnl, nominal_ret = backtest_utils.get_backtest_day_stats(portfolio_df, instruments, date, date_prev, i, historical_data)
-                print(pnl, nominal_ret)
+                pnl, nominal_ret = btu.get_backtest_day_stats(portfolio_df, instruments, date, date_prev, i, historical_data)
+                # print(pnl, nominal_ret)
                 #portfolio_df.loc[i, "capital"] = portfolio_df.loc[i - 1, "capital"] + pnl # already done in get_backtest_day_stats,
 
                 # Obtain strategy scalar
-                strat_scalar = backtest_utils.get_strat_scaler(portfolio_df, lookback=100, vol_target=self.vol_target, idx=i, default=strat_scalar)
+                strat_scalar = btu.get_strat_scaler(portfolio_df, lookback=100, vol_target=self.vol_target, idx=i, default=strat_scalar)
                 # the strategy leverage / scalar should dynamically equilibriate to achieve target exposure
 
             portfolio_df.loc[i, "strat scalar"] = strat_scalar
@@ -116,9 +132,11 @@ class Lbmom:
                 # vote long if fastMa > slowMA else no vote. We trying to harvest momentum. We use MA pairs to proxy momentum, and define its strength by fraction of trending pairs.
                 votes = [1 if (historical_data.loc[date, "{} ema{}".format(inst, str(pair))] > 0) else 0 for pair in self.pairs]
                 #print(votes) # votes from the different MA crossover pairs
+                votas = votes
                 forecast = np.sum(votes) / len(votes) # degree of momentum measured from 0 to 1, one if all trending, 0 if none trending
                 forecast = 0 if historical_data.loc[date, "{} adx".format(inst)] < 25 else forecast # if regine is not trending, set forecast to 0
 
+                votas = forecast
                 position_vol_target = (1 / len(tradable)) * portfolio_df.loc[i, "capital"] * self.vol_target / np.sqrt(253) # dollar volatility assigned to a single position
                 inst_price = historical_data.loc[date, "{} close".format(inst)]
                 percent_ret_vol = historical_data.loc[date, "{} % ret vol".format(inst)] if historical_data.loc[:date].tail(20)["{} % active".format(inst)].all() else 0.025
@@ -146,11 +164,25 @@ class Lbmom:
             """ Perform Calculations for Date """
             portfolio_df.loc[i, "nominal"] = nominal_total
             portfolio_df.loc[i, "leverage"] = nominal_total / portfolio_df.loc[i, "capital"]
-            print(portfolio_df.loc[i])
+            # print(portfolio_df.loc[i])
         
         # store in excel file, to see what strategy generates
-        portfolio_df.to_excel("libmom.xlsx")
-        return portfolio_df, instruments
+        ct = str(datetime.datetime.now())
+        fileName= ct.split(" ")[0]
+        sheetName= "-".join(ct.split(" ")[1].split(":"))
+        print("Votes: ", votas)
+        portfolio_df.to_excel("./Data/lbmom-"+ fileName +".xlsx", sheetName)
+        try:
+            with pd.ExcelWriter("./Data/lbmom-"+fileName+".xlsx", mode='a') as writer:  # doctest: +SKIP
+                portfolio_df.to_excel(writer, sheet_name=fileName+"--"+sheetName)
+        except FileNotFoundError:
+            portfolio_df.to_excel("./Data/lbmom-"+ fileName +".xlsx", sheetName)
+        except:
+            print("Lbmom could not write portfolio details to file")
 
-    def get_subsys_pos(self):
-        portfolio_df, instruments = self.run_simulation(historical_data=self.historical_df)
+        return portfolio_df, instruments
+    
+    def get_subsys_pos(self, pairs, startCapital):
+
+        self.pairs = pairs
+        return self.run_simulation(historical_data=self.historical_df, startCapital=startCapital)

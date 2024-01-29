@@ -1,5 +1,6 @@
 # pip install -r requirements.txt
 bs4==0.0.1
+ipympl==0.9.3
 pandas==2.0.0
 requests==2.29.0
 yfinance==0.2.20
