@@ -1,6 +1,6 @@
 from numpy import array
 from keras.models import Sequential
-from keras.layers import LSTM
+from keras.layers import LSTM, Dropout
 from keras.layers import Dense, Bidirectional
 from keras.preprocessing.sequence import TimeseriesGenerator
 import quantlib.general_utils as gu
@@ -273,9 +273,27 @@ def tg_vanilla(df1, inst, goval):
     model = Sequential()
     model.add(
         LSTM(10,
-            activation='relu',
+            activation='relu', return_sequences=True,
             input_shape=(look_back,1))
     )
+    model.add(Dropout(0.2))
+    model.add(
+        LSTM(10,
+            activation='relu',
+            return_sequences=True)
+    )
+    model.add(Dropout(0.2))
+    model.add(
+        LSTM(10,
+            activation='relu',
+            return_sequences=True)
+    )
+    model.add(Dropout(0.2))
+    model.add(
+        LSTM(10,
+            activation='relu')
+    )
+    model.add(Dropout(0.2))    
     model.add(Dense(1))
     model.compile(optimizer='adam', loss='mse')
 
@@ -328,7 +346,6 @@ def tg_bidirectional(df1, inst, goval):
     df['Date'] = pd.to_datetime(df.index.values)
     df = df.set_axis(df['Date'])
     df = df.drop(columns=cols)
-    print(df.head())
 
     close_data = df[inst+' close'].values
     close_data = close_data.reshape((-1,1))
@@ -336,8 +353,10 @@ def tg_bidirectional(df1, inst, goval):
     split_percent = 0.80
     split = int(split_percent*len(close_data))
 
+    look_back = 13
+
     close_train = close_data[:split]
-    close_test = close_data[split:]
+    close_test = close_data[split-look_back:]
 
     date_train = df['Date'][:split]
     date_test = df['Date'][split:]
@@ -345,18 +364,24 @@ def tg_bidirectional(df1, inst, goval):
     print(len(close_train))
     print(len(close_test))
 
-    look_back = 13
-
     train_generator = TimeseriesGenerator(close_train, close_train, length=look_back, batch_size=20)     
-    test_generator = TimeseriesGenerator(close_test, close_test, length=look_back, batch_size=1)
+    test_generator = TimeseriesGenerator(close_test, close_test, length=look_back, batch_size=10)
 
     model = Sequential()
-    model.add( Bidirectional(LSTM(10, activation='relu'), input_shape=(look_back,1)))
-    
+    model.add(Bidirectional(LSTM(10, activation='relu', return_sequences=False), input_shape=(look_back,1)))
+    # model.add(Dropout(0.02))
+    # model.add(Bidirectional(LSTM(10, return_sequences=True)))
+    # model.add(Dropout(0.02))    
+    # model.add(Bidirectional(LSTM(10, activation='relu', return_sequences=True)))
+    # model.add(Dropout(0.02))
+    # model.add(Bidirectional(LSTM(10, return_sequences=True)))
+    # model.add(Dropout(0.02))       
+    # model.add(Bidirectional(LSTM(10, activation='relu')))
+    # model.add(Dropout(0.02))  
     model.add(Dense(1))
     model.compile(optimizer='adam', loss='mse')
 
-    num_epochs = 75
+    num_epochs = 210
     model.fit_generator(train_generator, epochs=num_epochs, verbose=1)
 
     prediction = model.predict_generator(test_generator)
@@ -372,6 +397,10 @@ def tg_bidirectional(df1, inst, goval):
         name = 'Data'
     )
     print(date_test[-5:])
+    print(len(date_test))
+    print(len(prediction))
+    print(len(close_test))
+    # date_test1 = date_test[-len(prediction):]
     trace2 = go.Scatter(
         x = date_test,
         y = prediction,
@@ -380,7 +409,7 @@ def tg_bidirectional(df1, inst, goval):
     )
     trace3 = go.Scatter(
         x = date_test,
-        y = close_test,
+        y = close_test[look_back:],
         mode='lines',
         name = 'Ground Truth'
     )
@@ -402,16 +431,16 @@ def tg_bidirectional(df1, inst, goval):
             x = x.reshape((1, look_back, 1))
             out = model.predict(x)[0][0]
             prediction_list = np.append(prediction_list, out)
-        prediction_list = prediction_list[look_back-1:]
+        prediction_list = prediction_list[look_back:]
             
         return prediction_list
         
     def predict_dates(num_prediction):
         last_date = df['Date'].values[-1]
         prediction_dates = pd.date_range(last_date, periods=num_prediction+1).tolist()
-        return prediction_dates
+        return prediction_dates[1:]
 
-    num_prediction = 30
+    num_prediction = look_back - 7
     forecast = predict(num_prediction, model)
     forecast_dates = predict_dates(num_prediction)
 

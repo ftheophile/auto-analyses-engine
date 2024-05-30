@@ -69,7 +69,7 @@ def simulate_years(df, subsystem, pairs, yrs):
 
     # run simulation for 5 years
     #print(df.index[-1])
-    sim_start = df.index[-1] - relativedelta(years=yrs, months=3, days=0)
+    sim_start = df.index[-1] - relativedelta(years=yrs, months=2, days=0)
     print(subsystem, "Simulation start: ", sim_start)
 
     strat = None
@@ -129,13 +129,13 @@ def validate_results(portfolio_df, subsys):
         # cols = cols[-1:] + cols[:-1]
         # units_df = units_df[cols]  #    OR    df = df.ix[:, cols
         units_df = du.extract_columns_and_date(df=portfolio_df, dvalue=dvalue)
-        print(units_df.tail())
+        # print(units_df.tail())
         filtered_units = dict(filter(filter_instruments, units_df.filter(like=' '+dvalue).iloc[-1].to_dict().items()))
         filtered_units2 = dict(filter(filter_instruments, units_df.filter(like=' '+dvalue).iloc[-2].to_dict().items()))
         #filtered_pnl = dict(filter(filter_instruments, portfolio_df.filter(like=' pnl').drop(['daily pnl'], axis=1).iloc[-1].to_dict().items()))
         
-        # print(subsys, filtered_units)
         
+        print(units_df[filtered_units.keys()].tail())
         inst_pnl = portfolio_df.filter(like=' pnl').drop(['daily pnl'], axis=1).iloc[-1].to_dict()
         # print(inst_pnl)
         
@@ -160,8 +160,13 @@ def validate_results(portfolio_df, subsys):
                 inst_ch1d_percent = (inst_ch_1d / df[col1+' close'].iloc[-2])*100
                 y = lambda x: x > 0
                 inst_strength = sum ([ y(x) for x in [inst_ch_1d, inst_ch_2d, inst_ch_3d, inst_ch_4d]])
-                inst_price_euro = inst_price * 0.92
-                action = "{0:5}: {1:6.2f} {2:5} at {3:6.2f} ({4:6.2f}ℨ) with pnl {5:6.2f} ---- ch1 {6:6.2f}  ch2 {7:6.2f}  ch3 {8:6.2f}  ch4 {9:6.2f} and percentage change {10:6.3f}  strength {11:2.0f}/4".format(col1, inst_units, dvalue, inst_price, inst_price_euro, inst_pnl[col1+' pnl'], inst_ch_1d, inst_ch_2d, inst_ch_3d, inst_ch_4d, inst_ch1d_percent, inst_strength)
+                dollar2euro = lambda x: x * 0.92
+                inst_price_euro = dollar2euro(inst_price)
+                inst_potential = (6000 / inst_price_euro) *  dollar2euro(inst_ch_1d)
+
+                inst_ch_4dg = inst_price - df[col1+' close'].iloc[-5]
+                inst_pot_all = (6000 / inst_price_euro) *  dollar2euro(inst_ch_4dg)
+                action = "{0:5}: {1:6.2f} {2:5} at {3:6.2f} ({4:6.2f}ℨ) with pnl {5:6.2f} ---- ch1 {6:6.2f}  ch2 {7:6.2f}  ch3 {8:6.2f}  ch4 {9:6.2f} and \%\ change {10:6.3f}  strength {11:2.0f}/4 pot_1d {12:7.2f}  pot_4d {13:7.2f}".format(col1, inst_units, dvalue, inst_price, inst_price_euro, inst_pnl[col1+' pnl'], inst_ch_1d, inst_ch_2d, inst_ch_3d, inst_ch_4d, inst_ch1d_percent, inst_strength, inst_potential, inst_pot_all)
                 # print("%5s: %4.2f units at %4.2f % col1, inst_units, inst_price")
                 print(action)
                 # cprices.append(action)
